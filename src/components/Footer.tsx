@@ -1,6 +1,6 @@
 
 import { Link } from 'react-router-dom';
-import { Facebook, Twitter, Instagram, Linkedin, GitHub } from 'lucide-react';
+import { Facebook, Twitter, Instagram, Linkedin, Github } from 'lucide-react';
 
 const Footer = () => {
   return (
@@ -53,7 +53,7 @@ const Footer = () => {
                 <Linkedin className="h-5 w-5" />
               </a>
               <a href="https://github.com/vijaygiduthuri/starbucks" target="_blank" rel="noopener noreferrer" className="text-gray-600 hover:text-starbucks-green">
-                <GitHub className="h-5 w-5" />
+                <Github className="h-5 w-5" />
               </a>
             </div>
             <p className="text-sm text-gray-500">
