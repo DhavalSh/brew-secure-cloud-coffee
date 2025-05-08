@@ -1,73 +1,67 @@
-# Welcome to your Lovable project
 
-## Project info
+# Starbucks Clone with AWS DevSecOps Integration
 
-**URL**: https://lovable.dev/projects/cd89cfa2-59eb-48fd-a4a6-31b1151f3de5
+This project is a Starbucks clone built with React, Vite, TypeScript, and Tailwind CSS that demonstrates DevSecOps best practices and deployment on AWS.
 
-## How can I edit this code?
+## Project Overview
 
-There are several ways of editing your application.
+This application provides a responsive, user-friendly interface inspired by Starbucks, featuring:
 
-**Use Lovable**
+- Product catalog with filtering
+- Beautiful UI with Tailwind CSS
+- DevSecOps pipeline information
+- Docker containerization
+- AWS deployment architecture
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/cd89cfa2-59eb-48fd-a4a6-31b1151f3de5) and start prompting.
+## DevSecOps Features
 
-Changes made via Lovable will be committed automatically to this repo.
+- Dockerized application with security best practices
+- NGINX configuration with security headers
+- Non-root user for container execution
+- AWS deployment ready
 
-**Use your preferred IDE**
+## Development
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+```bash
+# Install dependencies
+npm install
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+# Run development server
 npm run dev
+
+# Build for production
+npm run build
+
+# Preview production build
+npm run preview
 ```
 
-**Edit a file directly in GitHub**
+## Docker Usage
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+```bash
+# Build the Docker image
+docker build -t starbucks-clone .
 
-**Use GitHub Codespaces**
+# Run the container
+docker run -p 8080:8080 starbucks-clone
+```
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## AWS Deployment
 
-## What technologies are used for this project?
+This application is designed to be deployed on AWS using:
 
-This project is built with:
+- Amazon ECR for container registry
+- Amazon ECS with Fargate for container execution
+- Application Load Balancer for traffic distribution
+- AWS WAF for security protection
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+## Security Features
 
-## How can I deploy this project?
+- Content Security Policy headers
+- Docker security best practices
+- Non-root user execution
+- X-Content-Type-Options and other security headers
 
-Simply open [Lovable](https://lovable.dev/projects/cd89cfa2-59eb-48fd-a4a6-31b1151f3de5) and click on Share -> Publish.
+## License
 
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+This project is for educational purposes only. Starbucks is a registered trademark of Starbucks Corporation.
