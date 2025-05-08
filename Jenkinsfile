@@ -1,122 +1,136 @@
 
 pipeline {
     agent any
-    
+
     tools {
-        // Use the name that matches your Jenkins configuration
-        maven 'Maven' // For SonarQube scanning
+        jdk 'jdk17'          // Must be configured in Jenkins Global Tool Configuration
+        nodejs 'node16'      // Requires NodeJS plugin and named node16 in Jenkins
     }
-    
+
     environment {
-        DOCKER_IMAGE = 'starbucks-clone'
-        DOCKER_TAG = "${env.BUILD_NUMBER}"
-        SCANNER_HOME = tool 'SonarQubeScanner' // Make sure this is configured in Jenkins
-        AWS_REGION = 'us-east-1' // Change to your region
-        ECR_REPOSITORY = '123456789012.dkr.ecr.us-east-1.amazonaws.com/starbucks-clone' // Replace with your actual ECR repo
+        SCANNER_HOME = tool 'sonar-scanner' // Must be defined in Global Tool Config
     }
-    
+
     stages {
-        stage('Checkout') {
+        stage ("Clean Workspace") {
             steps {
-                checkout scm
+                cleanWs()
             }
         }
-        
-        stage('Install Dependencies') {
+
+        stage ("Git Checkout") {
             steps {
-                sh 'npm install'
+                git branch: 'main', url: 'https://github.com/YOUR-USERNAME/YOUR-REPO.git'
             }
         }
-        
-        stage('Static Code Analysis') {
+
+        stage("SonarQube Analysis") {
             steps {
-                sh 'npm run lint || true' // Add a linting script to package.json
-            }
-        }
-        
-        stage('SonarQube Analysis') {
-            steps {
-                withSonarQubeEnv('SonarQube') {
-                    sh "${SCANNER_HOME}/bin/sonar-scanner \
-                        -Dsonar.projectKey=starbucks-clone \
-                        -Dsonar.projectName='Starbucks Clone' \
-                        -Dsonar.sources=src"
+                withSonarQubeEnv('sonar-server') {
+                    sh '''
+                        $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName=starbucks \
+                        -Dsonar.projectKey=starbucks
+                    '''
                 }
             }
         }
-        
-        stage('Security Scan') {
+
+        stage("Quality Gate") {
             steps {
-                sh 'npm audit || true'
-            }
-        }
-        
-        stage('Build') {
-            steps {
-                sh 'npm run build'
-            }
-        }
-        
-        stage('Docker Build') {
-            steps {
-                sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
-                sh "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${ECR_REPOSITORY}:${DOCKER_TAG}"
-                sh "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${ECR_REPOSITORY}:latest"
-            }
-        }
-        
-        stage('Docker Security Scan') {
-            steps {
-                sh "trivy image ${DOCKER_IMAGE}:${DOCKER_TAG} --severity HIGH,CRITICAL || true"
-            }
-        }
-        
-        stage('Push to ECR') {
-            steps {
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', 
-                                  credentialsId: 'aws-credentials', 
-                                  accessKeyVariable: 'AWS_ACCESS_KEY_ID', 
-                                  secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
-                    sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPOSITORY}"
-                    sh "docker push ${ECR_REPOSITORY}:${DOCKER_TAG}"
-                    sh "docker push ${ECR_REPOSITORY}:latest"
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token'
                 }
             }
         }
-        
-        stage('Deploy to ECS') {
+
+        stage("Install NPM Dependencies") {
             steps {
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', 
-                                  credentialsId: 'aws-credentials', 
-                                  accessKeyVariable: 'AWS_ACCESS_KEY_ID', 
-                                  secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
-                    sh "aws ecs update-service --cluster starbucks-cluster --service starbucks-service --force-new-deployment --region ${AWS_REGION}"
+                sh "npm install"
+            }
+        }
+
+        stage("OWASP FS Scan") {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+
+        stage("Trivy File Scan") {
+            steps {
+                sh "trivy fs . > trivy.txt"
+            }
+        }
+
+        stage("Build") {
+            steps {
+                sh "npm run build"
+            }
+        }
+
+        stage("Build Docker Image") {
+            steps {
+                sh "docker build -t starbucks ."
+            }
+        }
+
+        stage("Tag & Push to DockerHub") {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker') {
+                        sh "docker tag starbucks vijaygiduthuri/starbucks:latest"
+                        sh "docker push vijaygiduthuri/starbucks:latest"
+                    }
                 }
             }
         }
-        
-        stage('Integration Test') {
+
+        stage("Docker Scout Image Scan") {
             steps {
-                echo 'Running integration tests...'
-                // Add your integration test commands here
+                script {
+                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+                        sh 'docker-scout quickview vijaygiduthuri/starbucks:latest'
+                        sh 'docker-scout cves vijaygiduthuri/starbucks:latest'
+                        sh 'docker-scout recommendations vijaygiduthuri/starbucks:latest'
+                    }
+                }
+            }
+        }
+
+        stage("Deploy to Container") {
+            steps {
+                sh 'docker run -d --name starbucks -p 3000:3000 vijaygiduthuri/starbucks:latest'
             }
         }
     }
-    
+
     post {
         always {
-            // Clean up Docker images
-            sh "docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG} || true"
-            sh "docker rmi ${ECR_REPOSITORY}:${DOCKER_TAG} || true"
-            sh "docker rmi ${ECR_REPOSITORY}:latest || true"
-        }
-        
-        success {
-            echo 'Pipeline completed successfully!'
-        }
-        
-        failure {
-            echo 'Pipeline failed!'
+            emailext attachLog: true,
+                subject: "'${currentBuild.result}'",
+                body: """
+                    <html>
+                    <body>
+                        <div style="background-color: #FFA07A; padding: 10px;">
+                            <p style="color: white; font-weight: bold;">Project: ${env.JOB_NAME}</p>
+                        </div>
+                        <div style="background-color: #90EE90; padding: 10px;">
+                            <p style="color: white; font-weight: bold;">Build Number: ${env.BUILD_NUMBER}</p>
+                        </div>
+                        <div style="background-color: #87CEEB; padding: 10px;">
+                            <p style="color: white; font-weight: bold;">URL: ${env.BUILD_URL}</p>
+                        </div>
+                    </body>
+                    </html>
+                """,
+                to: 'ai.redmine@gmail.com',
+                mimeType: 'text/html',
+                attachmentsPattern: 'trivy.txt'
+            
+            // Clean up Docker container and image
+            sh "docker stop starbucks || true"
+            sh "docker rm starbucks || true"
         }
     }
 }
