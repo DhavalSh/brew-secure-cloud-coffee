@@ -1,6 +1,6 @@
 
-# Use Node.js LTS as base image for build stage
-FROM node:20-alpine AS build
+# Build stage
+FROM node:20 AS build
 
 # Set working directory
 WORKDIR /app
@@ -19,7 +19,16 @@ COPY . .
 RUN npm run build
 
 # Production stage
-FROM nginx:1.25-alpine AS production
+FROM ubuntu:22.04 AS production
+
+# Set noninteractive installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install Nginx and other required packages
+RUN apt-get update && \
+    apt-get install -y nginx curl && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy custom nginx configuration
 COPY nginx.conf /etc/nginx/conf.d/default.conf
@@ -28,8 +37,8 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 
 # Create a non-root user
-RUN addgroup -g 1001 -S appgroup && \
-    adduser -u 1001 -S appuser -G appgroup
+RUN groupadd -g 1001 appgroup && \
+    useradd -u 1001 -g appgroup -s /bin/bash -m appuser
 
 # Set permissions
 RUN chown -R appuser:appgroup /usr/share/nginx/html && \
@@ -39,12 +48,14 @@ RUN chown -R appuser:appgroup /usr/share/nginx/html && \
     touch /var/run/nginx.pid && \
     chown -R appuser:appgroup /var/run/nginx.pid
 
-# Security settings
-RUN echo 'server_tokens off;' > /etc/nginx/conf.d/security.conf && \
+# Configure nginx to run with the non-root user
+RUN mkdir -p /etc/nginx/conf.d/ && \
+    echo 'server_tokens off;' > /etc/nginx/conf.d/security.conf && \
     echo 'add_header X-Content-Type-Options nosniff;' >> /etc/nginx/conf.d/security.conf && \
     echo 'add_header X-Frame-Options SAMEORIGIN;' >> /etc/nginx/conf.d/security.conf && \
     echo 'add_header X-XSS-Protection "1; mode=block";' >> /etc/nginx/conf.d/security.conf && \
-    echo 'add_header Content-Security-Policy "default-src '\''self'\''";' >> /etc/nginx/conf.d/security.conf
+    echo 'add_header Content-Security-Policy "default-src '\''self'\''";' >> /etc/nginx/conf.d/security.conf && \
+    sed -i 's/user www-data;/user appuser;/' /etc/nginx/nginx.conf
 
 # Switch to the non-root user
 USER appuser
