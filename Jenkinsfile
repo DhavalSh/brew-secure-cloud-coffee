@@ -1,114 +1,117 @@
 
 pipeline {
     agent any
-
+    
+    // Update these tool configurations based on what's available in your Jenkins
     tools {
-        jdk 'jdk17'          // Must be configured in Jenkins Global Tool Configuration
-        nodejs 'node16'      // Requires NodeJS plugin and named node16 in Jenkins
+        // These need to match exactly the names configured in Jenkins Global Tool Configuration
+        jdk 'jdk17'
+        maven 'maven3'
     }
-
+    
     environment {
-        SCANNER_HOME = tool 'sonar-scanner' // Must be defined in Global Tool Config
+        SCANNER_HOME = tool 'sonar-scanner'
+        DOCKER_IMAGE = "starbucks-app"
+        DOCKER_TAG = "${BUILD_NUMBER}"
+        DOCKERHUB_CREDENTIALS = credentials('docker-hub')
     }
-
+    
     stages {
         stage ("Clean Workspace") {
             steps {
                 cleanWs()
             }
         }
-
+        
         stage ("Git Checkout") {
             steps {
                 git branch: 'main', url: 'https://github.com/YOUR-USERNAME/YOUR-REPO.git'
             }
         }
-
+        
         stage("SonarQube Analysis") {
             steps {
                 withSonarQubeEnv('sonar-server') {
                     sh '''
                         $SCANNER_HOME/bin/sonar-scanner \
                         -Dsonar.projectName=starbucks \
-                        -Dsonar.projectKey=starbucks
+                        -Dsonar.projectKey=starbucks \
+                        -Dsonar.sources=src/ \
+                        -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
                     '''
                 }
             }
         }
-
+        
         stage("Quality Gate") {
             steps {
-                script {
+                timeout(time: 1, unit: 'HOURS') {
                     waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token'
                 }
             }
         }
-
+        
         stage("Install NPM Dependencies") {
             steps {
                 sh "npm install"
             }
         }
-
-        stage("OWASP FS Scan") {
+        
+        stage("Build Application") {
+            steps {
+                sh "npm run build"
+            }
+        }
+        
+        stage("OWASP Dependency Check") {
             steps {
                 dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
                 dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
             }
         }
-
+        
         stage("Trivy File Scan") {
             steps {
                 sh "trivy fs . > trivy.txt"
             }
         }
-
-        stage("Build") {
-            steps {
-                sh "npm run build"
-            }
-        }
-
+        
         stage("Build Docker Image") {
             steps {
-                sh "docker build -t starbucks ."
+                sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
+                sh "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest"
             }
         }
-
+        
         stage("Tag & Push to DockerHub") {
             steps {
-                script {
-                    withDockerRegistry(credentialsId: 'docker') {
-                        sh "docker tag starbucks vijaygiduthuri/starbucks:latest"
-                        sh "docker push vijaygiduthuri/starbucks:latest"
-                    }
-                }
+                sh 'echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin'
+                sh "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} \$DOCKERHUB_CREDENTIALS_USR/${DOCKER_IMAGE}:${DOCKER_TAG}"
+                sh "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} \$DOCKERHUB_CREDENTIALS_USR/${DOCKER_IMAGE}:latest"
+                sh "docker push \$DOCKERHUB_CREDENTIALS_USR/${DOCKER_IMAGE}:${DOCKER_TAG}"
+                sh "docker push \$DOCKERHUB_CREDENTIALS_USR/${DOCKER_IMAGE}:latest"
             }
         }
-
-        stage("Docker Scout Image Scan") {
+        
+        stage("Security Scan Docker Image") {
             steps {
-                script {
-                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
-                        sh 'docker-scout quickview vijaygiduthuri/starbucks:latest'
-                        sh 'docker-scout cves vijaygiduthuri/starbucks:latest'
-                        sh 'docker-scout recommendations vijaygiduthuri/starbucks:latest'
-                    }
-                }
+                sh "trivy image \$DOCKERHUB_CREDENTIALS_USR/${DOCKER_IMAGE}:${DOCKER_TAG} > trivy-docker-report.txt"
             }
         }
-
-        stage("Deploy to Container") {
+        
+        stage("Deploy Container") {
             steps {
-                sh 'docker run -d --name starbucks -p 3000:3000 vijaygiduthuri/starbucks:latest'
+                sh "docker-compose down || true"
+                sh "docker-compose up -d"
             }
         }
     }
-
+    
     post {
         always {
+            // Send email with build results
             emailext attachLog: true,
-                subject: "'${currentBuild.result}'",
+                subject: "${currentBuild.result}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
                 body: """
                     <html>
                     <body>
@@ -124,13 +127,17 @@ pipeline {
                     </body>
                     </html>
                 """,
-                to: 'ai.redmine@gmail.com',
+                to: 'your-email@example.com',
                 mimeType: 'text/html',
-                attachmentsPattern: 'trivy.txt'
+                attachmentsPattern: 'trivy*.txt'
             
-            // Clean up Docker container and image
-            sh "docker stop starbucks || true"
-            sh "docker rm starbucks || true"
+            // Clean up Docker resources
+            sh "docker-compose down || true"
+            sh "docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG} || true"
+            sh "docker rmi ${DOCKER_IMAGE}:latest || true"
+            sh "docker rmi \$DOCKERHUB_CREDENTIALS_USR/${DOCKER_IMAGE}:${DOCKER_TAG} || true"
+            sh "docker rmi \$DOCKERHUB_CREDENTIALS_USR/${DOCKER_IMAGE}:latest || true"
+            sh "docker logout"
         }
     }
 }
